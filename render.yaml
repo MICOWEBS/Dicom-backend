@@ -1,0 +1,29 @@
+services:
+  - type: web
+    name: dicom-viewer-backend
+    env: node
+    buildCommand: npm install && npm run build
+    startCommand: npm start
+    envVars:
+      - key: PORT
+        value: 3001
+      - key: MONGODB_URI
+        fromDatabase:
+          name: dicom-viewer-db
+          property: connectionString
+      - key: JWT_SECRET
+        generateValue: true
+      - key: PYTHON_PATH
+        value: /usr/bin/python3
+      - key: STRIPE_SECRET_KEY
+        sync: false
+      - key: STRIPE_WEBHOOK_SECRET
+        sync: false
+      - key: CLOUDINARY_CLOUD_NAME
+        sync: false
+      - key: CLOUDINARY_API_KEY
+        sync: false
+      - key: CLOUDINARY_API_SECRET
+        sync: false
+    healthCheckPath: /api/health
+    autoDeploy: true 
