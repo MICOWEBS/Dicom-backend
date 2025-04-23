@@ -4,7 +4,9 @@
   "description": "Backend for DICOM viewer application with Cloudinary storage and AI inference",
   "main": "dist/index.js",
   "scripts": {
-    "build": "tsc",
+    "clean": "rimraf dist",
+    "prebuild": "npm run clean",
+    "build": "tsc && cp package.json dist/ && cp -r src/views dist/ || true",
     "start": "node dist/index.js",
     "dev": "ts-node-dev --respawn --transpile-only src/index.ts",
     "typeorm": "typeorm-ts-node-commonjs"
