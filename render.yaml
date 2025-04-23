@@ -2,8 +2,9 @@ services:
   - type: web
     name: dicom-viewer-backend
     env: node
+    nodeVersion: 18.17.0
     buildCommand: npm install && npm run build
-    startCommand: node dist/index.js
+    startCommand: npm start
     envVars:
       - key: PORT
         value: 3001
