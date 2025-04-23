@@ -2,11 +2,11 @@
   "name": "dicom-viewer-backend",
   "version": "1.0.0",
   "description": "Backend for DICOM viewer application with Cloudinary storage and AI inference",
-  "main": "dist/index.js",
+  "main": "server.js",
   "scripts": {
     "prebuild": "rimraf dist",
     "build": "tsc",
-    "start": "node dist/index.js",
+    "start": "node server.js",
     "dev": "ts-node-dev --respawn --transpile-only src/index.ts",
     "typeorm": "typeorm-ts-node-commonjs"
   },
