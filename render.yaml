@@ -4,7 +4,7 @@ services:
     env: node
     nodeVersion: 18.17.0
     buildCommand: npm install && npm run build
-    startCommand: cd dist && npm start
+    startCommand: npm start
     envVars:
       - key: PORT
         value: 3001

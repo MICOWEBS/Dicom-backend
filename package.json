@@ -4,8 +4,7 @@
   "description": "Backend for DICOM viewer application with Cloudinary storage and AI inference",
   "main": "dist/index.js",
   "scripts": {
-    "prebuild": "node build.js",
-    "build": "echo 'Build completed'",
+    "build": "tsc",
     "start": "node dist/index.js",
     "dev": "ts-node-dev --respawn --transpile-only src/index.ts",
     "typeorm": "typeorm-ts-node-commonjs"
@@ -40,7 +39,6 @@
   },
   "devDependencies": {
     "@types/bcryptjs": "^2.4.2",
-    "rimraf": "^5.0.5",
     "ts-node": "^10.9.1",
     "ts-node-dev": "^2.0.0"
   }
