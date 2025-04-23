@@ -1,6 +1,6 @@
 # DICOM Viewer Backend
 
-The backend service for the DICOM Viewer application, providing API endpoints for DICOM file management and AI-powered analysis.
+A powerful backend service for medical imaging analysis, providing secure DICOM file management, AI-powered image processing, and real-time inference capabilities. Built with Node.js, TypeScript, and Python for seamless integration with medical imaging workflows.
 
 ## Features
 
