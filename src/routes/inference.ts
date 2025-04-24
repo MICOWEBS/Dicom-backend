@@ -1,93 +1,105 @@
-import { Router, Request, Response } from 'express';
-import axios from 'axios';
-import { AppDataSource } from '../ormconfig';
+import { Router, Request, Response, NextFunction } from 'express';
+import { authenticateToken } from '../middlewares/auth';
 import { DicomFile } from '../entities/DicomFile';
-import { auth } from '../middlewares/auth';
-import { User } from '../entities/User';
+import { AppDataSource } from '../ormconfig';
+import { User, SubscriptionTier } from '../entities/User';
 
 interface AuthRequest extends Request {
-  user?: User;
+  user?: {
+    id: string;
+    email: string;
+    subscriptionTier: SubscriptionTier;
+  };
+  params: {
+    id?: string;
+  };
+}
+
+interface AuthResponse extends Response {
+  headers: { [key: string]: string | string[] | undefined };
 }
 
 const router = Router();
 const dicomRepository = AppDataSource.getRepository(DicomFile);
 
-router.post('/:id', auth, async (req: AuthRequest, res: Response) => {
+// Start inference on a DICOM file
+const startInference = async (req: AuthRequest, res: AuthResponse): Promise<void> => {
   try {
-    if (!req.user) {
-      return res.status(401).json({ message: 'Authentication required' });
+    const fileId = req.params.id;
+    if (!fileId) {
+      res.status(400).json({ message: 'File ID is required' });
+      return;
     }
 
-    const dicomFile = await dicomRepository.findOne({
-      where: { id: req.params.id, userId: req.user.id }
-    });
-
-    if (!dicomFile) {
-      return res.status(404).json({ message: 'File not found' });
-    }
-
-    // Call AI service
-    const aiResponse = await axios.post(
-      `${process.env.AI_API_URL}/inference`,
-      {
-        imageUrl: dicomFile.cloudinarySecureUrl,
-        metadata: dicomFile.metadata
-      },
-      {
-        headers: {
-          'Authorization': `Bearer ${process.env.AI_API_KEY}`,
-          'Content-Type': 'application/json'
-        }
+    const file = await dicomRepository.findOne({
+      where: { 
+        id: fileId,
+        userId: req.user?.id 
       }
-    );
+    });
 
-    // Update DICOM file with AI results
-    dicomFile.aiResults = aiResponse.data as {
-      predictions?: any[];
-      annotations?: any[];
-      [key: string]: any;
+    if (!file) {
+      res.status(404).json({ message: 'File not found' });
+      return;
+    }
+
+    // Update file status to processing
+    file.aiResults = {
+      ...file.aiResults,
+      status: 'processing',
+      startedAt: new Date().toISOString()
     };
-    await dicomRepository.save(dicomFile);
+    await dicomRepository.save(file);
 
-    return res.json(dicomFile.aiResults);
-  } catch (error) {
-    console.error('AI inference error:', error);
-    return res.status(500).json({ 
-      message: 'Error processing AI inference',
-      error: error instanceof Error ? error.message : 'Unknown error'
+    // TODO: Start actual inference process here
+    // This is a placeholder for the actual inference logic
+
+    res.json({ 
+      message: 'Inference started',
+      fileId: file.id
     });
+  } catch (error) {
+    console.error('Start inference error:', error);
+    res.status(500).json({ message: 'Error starting inference' });
   }
-});
+};
 
-router.get('/status/:id', auth, async (req: AuthRequest, res: Response) => {
+// Get inference status for a DICOM file
+const getInferenceStatus = async (req: AuthRequest, res: AuthResponse): Promise<void> => {
   try {
-    if (!req.user) {
-      return res.status(401).json({ message: 'Authentication required' });
+    const fileId = req.params.id;
+    if (!fileId) {
+      res.status(400).json({ message: 'File ID is required' });
+      return;
     }
 
-    const dicomFile = await dicomRepository.findOne({
-      where: { id: req.params.id, userId: req.user.id }
+    const file = await dicomRepository.findOne({
+      where: { 
+        id: fileId,
+        userId: req.user?.id 
+      }
     });
 
-    if (!dicomFile) {
-      return res.status(404).json({ message: 'File not found' });
+    if (!file) {
+      res.status(404).json({ message: 'File not found' });
+      return;
     }
 
-    if (!dicomFile.aiResults || Object.keys(dicomFile.aiResults).length === 0) {
-      return res.json({ status: 'pending' });
-    }
-
-    return res.json({
-      status: 'completed',
-      results: dicomFile.aiResults
+    res.json({
+      fileId: file.id,
+      status: file.aiResults?.status || 'pending',
+      startedAt: file.aiResults?.startedAt,
+      completedAt: file.aiResults?.completedAt,
+      results: file.aiResults?.predictions || []
     });
   } catch (error) {
-    console.error('Status check error:', error);
-    return res.status(500).json({ 
-      message: 'Error checking inference status',
-      error: error instanceof Error ? error.message : 'Unknown error'
-    });
+    console.error('Get status error:', error);
+    res.status(500).json({ message: 'Error getting inference status' });
   }
-});
+};
+
+// Apply auth middleware to protected routes
+router.post('/:id', authenticateToken, startInference);
+router.get('/status/:id', authenticateToken, getInferenceStatus);
 
 export default router; 

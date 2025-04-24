@@ -3,8 +3,8 @@ import multer from 'multer';
 import { v2 as cloudinary } from 'cloudinary';
 import { AppDataSource } from '../ormconfig';
 import { DicomFile } from '../entities/DicomFile';
-import { auth, checkSubscription } from '../middlewares/auth';
-import { User } from '../entities/User';
+import { authenticateToken } from '../middlewares/auth';
+import { User, SubscriptionTier } from '../entities/User';
 import fs from 'fs';
 import path from 'path';
 import { promisify } from 'util';
@@ -14,15 +14,19 @@ import { createGzip } from 'zlib';
 const pipelineAsync = promisify(pipeline);
 
 interface AuthRequest extends Request {
-  user?: User;
+  user?: {
+    id: string;
+    email: string;
+    subscriptionTier: SubscriptionTier;
+  };
+  file?: Express.Multer.File;
+  params: {
+    id?: string;
+  };
 }
 
-interface ChunkedUploadRequest extends AuthRequest {
-  body: {
-    chunkIndex: number;
-    totalChunks: number;
-    originalFilename: string;
-  };
+interface AuthResponse extends Response {
+  headers: { [key: string]: string | string[] | undefined };
 }
 
 // Configure Cloudinary
@@ -32,26 +36,20 @@ cloudinary.config({
   api_secret: process.env.CLOUDINARY_API_SECRET
 });
 
-// Configure multer for chunked uploads
+// Configure multer for file uploads
 const storage = multer.diskStorage({
-  destination: './uploads/chunks',
+  destination: (req, file, cb) => {
+    cb(null, 'uploads/');
+  },
   filename: (req, file, cb) => {
-    const { chunkIndex, originalFilename } = (req as ChunkedUploadRequest).body;
-    cb(null, `${originalFilename}-${chunkIndex}`);
+    cb(null, `${Date.now()}-${file.originalname}`);
   }
 });
 
-const upload = multer({
+const upload = multer({ 
   storage,
-  fileFilter: (req, file, cb) => {
-    if (file.mimetype === 'application/dicom') {
-      cb(null, true);
-    } else {
-      cb(new Error('Invalid file type. Only DICOM files are allowed.'));
-    }
-  },
   limits: {
-    fileSize: 10 * 1024 * 1024 // 10MB per chunk
+    fileSize: 50 * 1024 * 1024 // 50MB limit
   }
 });
 
@@ -80,143 +78,86 @@ async function retryOperation<T>(
   throw lastError!;
 }
 
-// Upload chunk
-router.post('/chunk', auth, checkSubscription, upload.single('chunk'), async (req: ChunkedUploadRequest, res: Response) => {
+// Upload DICOM file
+const uploadDicom = async (req: AuthRequest, res: AuthResponse): Promise<void> => {
   try {
     if (!req.file) {
-      return res.status(400).json({ message: 'No chunk uploaded' });
+      res.status(400).json({ message: 'No file uploaded' });
+      return;
     }
 
     if (!req.user) {
-      return res.status(401).json({ message: 'Authentication required' });
+      res.status(401).json({ message: 'Unauthorized' });
+      return;
     }
 
-    const { chunkIndex, totalChunks, originalFilename } = req.body;
-    
-    // Set timeout for the request
-    req.setTimeout(300000); // 5 minutes timeout
-
-    res.json({
-      message: 'Chunk uploaded successfully',
-      chunkIndex,
-      totalChunks
-    });
-  } catch (error) {
-    console.error('Chunk upload error:', error);
-    res.status(500).json({ message: 'Error uploading chunk' });
-  }
-});
-
-// Complete upload and merge chunks
-router.post('/complete', auth, checkSubscription, async (req: AuthRequest, res: Response) => {
-  try {
-    if (!req.user) {
-      return res.status(401).json({ message: 'Authentication required' });
-    }
-
-    const { originalFilename, totalChunks } = req.body;
-    const chunksDir = './uploads/chunks';
-    const mergedFilePath = path.join('./uploads', originalFilename);
-
-    // Set timeout for the request
-    req.setTimeout(600000); // 10 minutes timeout for merging
-
-    // Merge chunks
-    const writeStream = fs.createWriteStream(mergedFilePath);
-    const gzip = createGzip();
-
-    for (let i = 0; i < totalChunks; i++) {
-      const chunkPath = path.join(chunksDir, `${originalFilename}-${i}`);
-      const readStream = fs.createReadStream(chunkPath);
-      
-      await pipelineAsync(readStream, gzip, writeStream);
-      
-      // Clean up chunk
-      fs.unlinkSync(chunkPath);
-    }
-
-    // Upload to Cloudinary with retry logic
-    const result = await retryOperation(async () => {
-      return await cloudinary.uploader.upload(mergedFilePath, {
-        resource_type: 'raw',
-        public_id: `dicom/${req.user!.id}/${Date.now()}-${originalFilename}`,
-        access_mode: 'authenticated'
-      });
-    });
-
-    // Create DICOM file record
     const dicomFile = dicomRepository.create({
-      filename: originalFilename,
-      cloudinaryPublicId: result.public_id,
-      cloudinarySecureUrl: result.secure_url,
+      filename: req.file.filename,
+      cloudinaryPublicId: req.file.filename, // Using filename as public ID for now
+      cloudinarySecureUrl: `/uploads/${req.file.filename}`, // Using local path for now
       userId: req.user.id,
       metadata: {},
       aiResults: {}
     });
 
     await dicomRepository.save(dicomFile);
-
-    // Clean up merged file
-    fs.unlinkSync(mergedFilePath);
-
     res.status(201).json(dicomFile);
-  } catch (error: unknown) {
-    console.error('Upload completion error:', error);
-    if (error && typeof error === 'object' && 'code' in error && error.code === 'ETIMEDOUT') {
-      res.status(408).json({ message: 'Request timeout' });
-    } else {
-      res.status(500).json({ message: 'Error completing upload' });
-    }
+  } catch (error) {
+    console.error('Upload error:', error);
+    res.status(500).json({ message: 'Error uploading file' });
   }
-});
+};
 
-// Get all uploaded files
-router.get('/', auth, async (req: AuthRequest, res: Response) => {
+// Get all DICOM files for current user
+const getDicomFiles = async (req: AuthRequest, res: AuthResponse): Promise<void> => {
   try {
     if (!req.user) {
-      return res.status(401).json({ message: 'Authentication required' });
+      res.status(401).json({ message: 'Unauthorized' });
+      return;
     }
 
-    const dicomFiles = await dicomRepository.find({
+    const files = await dicomRepository.find({
       where: { userId: req.user.id },
       order: { createdAt: 'DESC' }
     });
-
-    res.json(dicomFiles);
+    res.json(files);
   } catch (error) {
-    res.status(500).json({ message: 'Error fetching files' });
+    console.error('Get files error:', error);
+    res.status(500).json({ message: 'Error retrieving files' });
   }
-});
+};
 
-// Delete file
-router.delete('/:id', auth, async (req: AuthRequest, res: Response) => {
+// Delete DICOM file
+const deleteDicomFile = async (req: AuthRequest, res: AuthResponse): Promise<void> => {
   try {
     if (!req.user) {
-      return res.status(401).json({ message: 'Authentication required' });
+      res.status(401).json({ message: 'Unauthorized' });
+      return;
     }
 
-    const dicomFile = await dicomRepository.findOne({
-      where: { id: req.params.id, userId: req.user.id }
+    const file = await dicomRepository.findOne({
+      where: { 
+        id: req.params.id,
+        userId: req.user.id 
+      }
     });
 
-    if (!dicomFile) {
-      return res.status(404).json({ message: 'File not found' });
+    if (!file) {
+      res.status(404).json({ message: 'File not found' });
+      return;
     }
 
-    // Delete from Cloudinary with retry logic
-    await retryOperation(async () => {
-      return await cloudinary.uploader.destroy(dicomFile.cloudinaryPublicId, {
-        resource_type: 'raw'
-      });
-    });
-
-    // Delete from database
-    await dicomRepository.remove(dicomFile);
-
+    await dicomRepository.remove(file);
     res.json({ message: 'File deleted successfully' });
   } catch (error) {
+    console.error('Delete file error:', error);
     res.status(500).json({ message: 'Error deleting file' });
   }
-});
+};
+
+// Apply auth middleware to protected routes
+router.post('/', authenticateToken, upload.single('file'), uploadDicom);
+router.get('/', authenticateToken, getDicomFiles);
+router.delete('/:id', authenticateToken, deleteDicomFile);
 
 export default router; 

@@ -1,14 +1,25 @@
 import { Router, Request, Response } from 'express';
 import Stripe from 'stripe';
 import { AppDataSource } from '../ormconfig';
-import { User } from '../entities/User';
-import { auth } from '../middlewares/auth';
+import { User, SubscriptionTier } from '../entities/User';
+import { authenticateToken } from '../middlewares/auth';
 
 interface AuthRequest extends Request {
-  user?: User;
+  user?: {
+    id: string;
+    email: string;
+    subscriptionTier: SubscriptionTier;
+    stripeCustomerId?: string;
+    stripeSubscriptionId?: string;
+  };
+  body: {
+    tier: SubscriptionTier;
+  };
 }
 
-type SubscriptionTier = 'free' | 'pro' | 'enterprise';
+interface AuthResponse extends Response {
+  headers: { [key: string]: string | string[] | undefined };
+}
 
 const router = Router();
 
@@ -26,7 +37,7 @@ const SUBSCRIPTION_PRICES = {
   enterprise: 'price_enterprise_id'
 };
 
-router.post('/create-checkout-session', auth, async (req: AuthRequest, res: Response) => {
+router.post('/create-checkout-session', authenticateToken, async (req: AuthRequest, res: AuthResponse) => {
   try {
     if (!req.user) {
       return res.status(401).json({ message: 'Authentication required' });
@@ -84,7 +95,7 @@ router.post('/create-checkout-session', auth, async (req: AuthRequest, res: Resp
   }
 });
 
-router.post('/webhook', async (req: Request, res: Response) => {
+router.post('/webhook', async (req: Request & { body: any }, res: Response) => {
   const sig = req.headers['stripe-signature'];
 
   try {
@@ -135,7 +146,7 @@ router.post('/webhook', async (req: Request, res: Response) => {
   }
 });
 
-router.get('/subscription', auth, async (req: AuthRequest, res: Response) => {
+router.get('/subscription', authenticateToken, async (req: AuthRequest, res: AuthResponse) => {
   try {
     if (!req.user) {
       return res.status(401).json({ message: 'Authentication required' });
@@ -156,7 +167,7 @@ router.get('/subscription', auth, async (req: AuthRequest, res: Response) => {
   }
 });
 
-router.post('/cancel', auth, async (req: AuthRequest, res: Response) => {
+router.post('/cancel', authenticateToken, async (req: AuthRequest, res: AuthResponse) => {
   try {
     if (!req.user) {
       return res.status(401).json({ message: 'Authentication required' });

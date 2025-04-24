@@ -2,47 +2,68 @@ import { Router, Request, Response } from 'express';
 import { v2 as cloudinary } from 'cloudinary';
 import { AppDataSource } from '../ormconfig';
 import { DicomFile } from '../entities/DicomFile';
-import { auth } from '../middlewares/auth';
-import { User } from '../entities/User';
+import { authenticateToken } from '../middlewares/auth';
+import { User, SubscriptionTier } from '../entities/User';
 
 interface AuthRequest extends Request {
-  user?: User;
+  user?: {
+    id: string;
+    email: string;
+    subscriptionTier: SubscriptionTier;
+  };
+  params: {
+    id?: string;
+  };
+}
+
+interface AuthResponse extends Response {
+  headers: { [key: string]: string | string[] | undefined };
 }
 
 const router = Router();
 const dicomRepository = AppDataSource.getRepository(DicomFile);
 
-router.get('/:id', auth, async (req: AuthRequest, res: Response) => {
+// Get DICOM file for viewing
+const getDicomFile = async (req: AuthRequest, res: AuthResponse): Promise<void> => {
   try {
     if (!req.user) {
-      return res.status(401).json({ message: 'Authentication required' });
+      res.status(401).json({ message: 'Unauthorized' });
+      return;
     }
 
-    const dicomFile = await dicomRepository.findOne({
-      where: { id: req.params.id, userId: req.user.id }
+    const file = await dicomRepository.findOne({
+      where: { 
+        id: req.params.id,
+        userId: req.user.id 
+      }
     });
 
-    if (!dicomFile) {
-      return res.status(404).json({ message: 'File not found' });
+    if (!file) {
+      res.status(404).json({ message: 'File not found' });
+      return;
     }
 
     // Generate signed URL for secure access
     const signedUrl = cloudinary.utils.private_download_url(
-      dicomFile.cloudinaryPublicId,
+      file.cloudinaryPublicId,
       'raw',
       { expires_at: Math.floor(Date.now() / 1000) + 3600 } // URL expires in 1 hour
     );
 
     res.json({
-      ...dicomFile,
+      ...file,
       signedUrl
     });
   } catch (error) {
-    res.status(500).json({ message: 'Error fetching file' });
+    console.error('Get file error:', error);
+    res.status(500).json({ message: 'Error retrieving file' });
   }
-});
+};
 
-router.get('/:id/metadata', auth, async (req: AuthRequest, res: Response) => {
+// Apply auth middleware to protected routes
+router.get('/:id', authenticateToken, getDicomFile);
+
+router.get('/:id/metadata', authenticateToken, async (req: AuthRequest, res: Response) => {
   try {
     if (!req.user) {
       return res.status(401).json({ message: 'Authentication required' });
@@ -56,13 +77,13 @@ router.get('/:id/metadata', auth, async (req: AuthRequest, res: Response) => {
       return res.status(404).json({ message: 'File not found' });
     }
 
-    res.json(dicomFile.metadata);
+    return res.json(dicomFile.metadata);
   } catch (error) {
-    res.status(500).json({ message: 'Error fetching metadata' });
+    return res.status(500).json({ message: 'Error fetching metadata' });
   }
 });
 
-router.get('/:id/ai-results', auth, async (req: AuthRequest, res: Response) => {
+router.get('/:id/ai-results', authenticateToken, async (req: AuthRequest, res: Response) => {
   try {
     if (!req.user) {
       return res.status(401).json({ message: 'Authentication required' });
@@ -76,9 +97,9 @@ router.get('/:id/ai-results', auth, async (req: AuthRequest, res: Response) => {
       return res.status(404).json({ message: 'File not found' });
     }
 
-    res.json(dicomFile.aiResults);
+    return res.json(dicomFile.aiResults);
   } catch (error) {
-    res.status(500).json({ message: 'Error fetching AI results' });
+    return res.status(500).json({ message: 'Error fetching AI results' });
   }
 });
 

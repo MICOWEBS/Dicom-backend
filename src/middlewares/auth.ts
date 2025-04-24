@@ -1,39 +1,43 @@
-import { Request, Response, NextFunction } from 'express';
+import { Request, Response, NextFunction } from '../types/express';
 import jwt from 'jsonwebtoken';
 import { AppDataSource } from '../ormconfig';
-import { User } from '../entities/User';
+import { User, SubscriptionTier } from '../entities/User';
 
 interface AuthRequest extends Request {
-  user?: User;
+  user?: {
+    id: string;
+    email: string;
+    subscriptionTier: SubscriptionTier;
+  };
 }
 
-export const auth = async (req: AuthRequest, res: Response, next: NextFunction) => {
+export const authenticateToken = (req: AuthRequest, res: Response, next: NextFunction): void => {
+  const authHeader = req.header('Authorization');
+  const token = authHeader && authHeader.split(' ')[1];
+
+  if (!token) {
+    res.status(401).json({ message: 'Access denied. No token provided.' });
+    return;
+  }
+
   try {
-    const token = req.header('Authorization')?.replace('Bearer ', '');
-
-    if (!token) {
-      throw new Error();
-    }
-
-    const decoded = jwt.verify(token, process.env.JWT_SECRET!) as { id: string };
-    const userRepository = AppDataSource.getRepository(User);
-    const user = await userRepository.findOne({ where: { id: decoded.id } });
-
-    if (!user) {
-      throw new Error();
-    }
-
-    req.user = user;
+    const decoded = jwt.verify(token, process.env.JWT_SECRET as string) as { 
+      id: string; 
+      email: string;
+      subscriptionTier: SubscriptionTier;
+    };
+    req.user = decoded;
     next();
   } catch (error) {
-    res.status(401).json({ message: 'Please authenticate' });
+    res.status(403).json({ message: 'Invalid token.' });
   }
 };
 
-export const checkSubscription = async (req: AuthRequest, res: Response, next: NextFunction) => {
+export const checkSubscription = async (req: AuthRequest, res: Response, next: NextFunction): Promise<void> => {
   try {
     if (!req.user) {
-      throw new Error('Authentication required');
+      res.status(401).json({ message: 'Authentication required' });
+      return;
     }
 
     if (req.user.subscriptionTier === 'free') {
@@ -44,14 +48,14 @@ export const checkSubscription = async (req: AuthRequest, res: Response, next: N
       });
 
       if (uploadCount >= 5) {
-        return res.status(403).json({
-          message: 'Free tier limit reached. Please upgrade to continue uploading.'
-        });
+        res.status(403).json({ message: 'Free tier limit exceeded. Please upgrade your subscription.' });
+        return;
       }
     }
 
     next();
   } catch (error) {
-    res.status(401).json({ message: 'Please authenticate' });
+    console.error('Subscription check error:', error);
+    res.status(500).json({ message: 'Error checking subscription' });
   }
 }; 
