@@ -1,39 +1,66 @@
-import { Request, Response, NextFunction } from '../types/express';
+import { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
+import { User } from '../entities/User';
 import { AppDataSource } from '../ormconfig';
-import { User, SubscriptionTier } from '../entities/User';
 
-interface AuthRequest extends Request {
+export interface AuthRequest extends Request {
   user?: {
     id: string;
     email: string;
-    subscriptionTier: SubscriptionTier;
+    subscriptionTier: 'free' | 'pro' | 'enterprise';
   };
 }
 
-export const authenticateToken = (req: AuthRequest, res: Response, next: NextFunction): void => {
-  const authHeader = req.header('Authorization');
-  const token = authHeader && authHeader.split(' ')[1];
-
-  if (!token) {
-    res.status(401).json({ message: 'Access denied. No token provided.' });
-    return;
-  }
-
+export const authenticateToken = async (
+  req: AuthRequest,
+  res: Response,
+  next: NextFunction
+): Promise<void> => {
   try {
-    const decoded = jwt.verify(token, process.env.JWT_SECRET as string) as { 
-      id: string; 
-      email: string;
-      subscriptionTier: SubscriptionTier;
+    const authHeader = req.headers.authorization;
+    const token = typeof authHeader === 'string' ? authHeader.split(' ')[1] : null;
+
+    if (!token) {
+      res.status(401).json({ message: 'No token provided' });
+      return;
+    }
+
+    const decoded = jwt.verify(
+      token,
+      process.env.JWT_SECRET || 'your-secret-key'
+    ) as { userId: string };
+
+    const userRepository = AppDataSource.getRepository(User);
+    const user = await userRepository.findOne({
+      where: { id: decoded.userId },
+      select: ['id', 'email', 'subscriptionTier'],
+    });
+
+    if (!user) {
+      res.status(401).json({ message: 'User not found' });
+      return;
+    }
+
+    req.user = {
+      id: user.id,
+      email: user.email,
+      subscriptionTier: user.subscriptionTier,
     };
-    req.user = decoded;
+
     next();
+    return;
   } catch (error) {
-    res.status(403).json({ message: 'Invalid token.' });
+    console.error('Token authentication error:', error);
+    res.status(401).json({ message: 'Invalid token' });
+    return;
   }
 };
 
-export const checkSubscription = async (req: AuthRequest, res: Response, next: NextFunction): Promise<void> => {
+export const checkSubscription = async (
+  req: AuthRequest,
+  res: Response,
+  next: NextFunction
+): Promise<void> => {
   try {
     if (!req.user) {
       res.status(401).json({ message: 'Authentication required' });
@@ -41,21 +68,24 @@ export const checkSubscription = async (req: AuthRequest, res: Response, next: N
     }
 
     if (req.user.subscriptionTier === 'free') {
-      // Check if user has exceeded free tier limits
       const dicomRepository = AppDataSource.getRepository('DicomFile');
       const uploadCount = await dicomRepository.count({
-        where: { userId: req.user.id }
+        where: { userId: req.user.id },
       });
 
       if (uploadCount >= 5) {
-        res.status(403).json({ message: 'Free tier limit exceeded. Please upgrade your subscription.' });
+        res.status(403).json({
+          message: 'Free tier limit exceeded. Please upgrade your subscription.',
+        });
         return;
       }
     }
 
     next();
+    return;
   } catch (error) {
     console.error('Subscription check error:', error);
     res.status(500).json({ message: 'Error checking subscription' });
+    return;
   }
-}; 
+};

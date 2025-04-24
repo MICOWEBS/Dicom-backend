@@ -1,4 +1,4 @@
-import { Router, Request, Response } from 'express';
+import { Router, Request, Response, NextFunction } from 'express';
 import { body, validationResult } from 'express-validator';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
@@ -29,10 +29,6 @@ interface AuthRequest extends Request {
   body: RegisterBody | LoginBody;
 }
 
-interface AuthResponse extends Response {
-  headers: { [key: string]: string | string[] | undefined };
-}
-
 // Register route
 router.post(
   '/register',
@@ -43,7 +39,7 @@ router.post(
       .isLength({ min: 6 })
       .withMessage('Password must be at least 6 characters long'),
   ],
-  async (req: AuthRequest, res: AuthResponse) => {
+  async (req: AuthRequest, res: Response, next: NextFunction) => {
     try {
       const errors = validationResult(req);
       if (!errors.isEmpty()) {
@@ -89,8 +85,7 @@ router.post(
         },
       });
     } catch (error) {
-      console.error('Registration error:', error);
-      return res.status(500).json({ message: 'Internal server error' });
+      next(error);
     }
   }
 );
@@ -102,7 +97,7 @@ router.post(
     body('email').isEmail().withMessage('Valid email is required'),
     body('password').notEmpty().withMessage('Password is required'),
   ],
-  async (req: AuthRequest, res: AuthResponse) => {
+  async (req: AuthRequest, res: Response, next: NextFunction) => {
     try {
       const errors = validationResult(req);
       if (!errors.isEmpty()) {
@@ -141,14 +136,13 @@ router.post(
         },
       });
     } catch (error) {
-      console.error('Login error:', error);
-      return res.status(500).json({ message: 'Internal server error' });
+      next(error);
     }
   }
 );
 
 // Get current user route
-router.get('/me', authenticateToken, async (req: AuthRequest, res: AuthResponse) => {
+router.get('/me', authenticateToken, async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     if (!req.user) {
       return res.status(401).json({ message: 'Unauthorized' });
@@ -165,8 +159,7 @@ router.get('/me', authenticateToken, async (req: AuthRequest, res: AuthResponse)
 
     return res.json({ user });
   } catch (error) {
-    console.error('Get user error:', error);
-    return res.status(500).json({ message: 'Internal server error' });
+    next(error);
   }
 });
 

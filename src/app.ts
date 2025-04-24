@@ -1,11 +1,15 @@
-import express from 'express';
+import express, { Router } from 'express';
 import cors from 'cors';
-import helmet from 'helmet';
+import { json, urlencoded } from 'express';
 import { AppDataSource } from './ormconfig';
 import authRoutes from './routes/auth';
-import subscriptionRoutes from './routes/subscription';
+import uploadRoutes from './routes/upload';
 import dicomRoutes from './routes/dicom';
+import inferenceRoutes from './routes/inference';
+import stripeRoutes from './routes/stripe';
+import subscriptionRoutes from './routes/subscription';
 import healthRoutes from './routes/health';
+import viewerRoutes from './routes/viewer';
 import { errorHandler, notFoundHandler } from './middlewares/security';
 import fs from 'fs';
 import path from 'path';
@@ -25,16 +29,19 @@ if (!fs.existsSync(chunksDir)) {
 }
 
 // Middleware
-app.use(helmet());
 app.use(cors());
-app.use(express.json({ limit: '100mb' }));
-app.use(express.urlencoded({ limit: '100mb', extended: true }));
+app.use(json());
+app.use(urlencoded({ extended: true }));
 
 // Routes
-app.use('/api/auth', authRoutes);
-app.use('/api/subscription', subscriptionRoutes);
-app.use('/api/dicom', dicomRoutes);
-app.use('/api', healthRoutes);
+app.use('/api/auth', authRoutes as Router);
+app.use('/api/upload', uploadRoutes as Router);
+app.use('/api/dicom', dicomRoutes as Router);
+app.use('/api/inference', inferenceRoutes as Router);
+app.use('/api/stripe', stripeRoutes as Router);
+app.use('/api/subscription', subscriptionRoutes as Router);
+app.use('/api/health', healthRoutes as Router);
+app.use('/api/viewer', viewerRoutes as Router);
 
 // Error handling
 app.use(notFoundHandler);

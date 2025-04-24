@@ -1,13 +1,13 @@
-import { Request as ExpressRequest, Response as ExpressResponse, NextFunction as ExpressNextFunction, Application as ExpressApplication } from 'express';
+import { Request, Response } from 'express';
 import { SubscriptionTier } from '../entities/User';
 
 declare global {
   namespace Express {
-    interface Request extends ExpressRequest {
+    interface Request {
       user?: {
         id: string;
         email: string;
-        subscriptionTier: SubscriptionTier;
+        subscriptionTier: 'free' | 'pro' | 'enterprise';
       };
       header: (name: string) => string | undefined;
       headers: { [key: string]: string | string[] | undefined };
@@ -18,7 +18,7 @@ declare global {
       secure: boolean;
     }
 
-    interface Response extends ExpressResponse {
+    interface Response extends Response {
       status(code: number): Response;
       json(body: any): Response;
       redirect(url: string): void;
@@ -35,7 +35,7 @@ declare module 'express' {
     user?: {
       id: string;
       email: string;
-      subscriptionTier: SubscriptionTier;
+      subscriptionTier: 'free' | 'pro' | 'enterprise';
     };
     header: (name: string) => string | undefined;
     headers: { [key: string]: string | string[] | undefined };
@@ -52,6 +52,14 @@ declare module 'express' {
     redirect(url: string): void;
     headers: { [key: string]: string | string[] | undefined };
   }
+}
+
+export interface TypedRequest<T = any> extends Request {
+  body: T;
+}
+
+export interface TypedResponse<T = any> extends Response {
+  json: (body: T) => TypedResponse<T>;
 }
 
 export { ExpressRequest as Request, ExpressResponse as Response, ExpressNextFunction as NextFunction, ExpressApplication as Application }; 
