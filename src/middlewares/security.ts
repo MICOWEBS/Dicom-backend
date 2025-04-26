@@ -85,8 +85,18 @@ export const securityMiddleware = [
 ];
 
 export const errorHandler = (err: Error, req: Request, res: Response, next: NextFunction): void => {
-  console.error(err.stack);
-  res.status(500).json({ error: 'Internal Server Error' });
+  console.error('Error details:', {
+    message: err.message,
+    stack: err.stack,
+    name: err.name
+  });
+  
+  res.status(500).json({ 
+    error: 'Internal Server Error',
+    message: err.message,
+    name: err.name,
+    stack: process.env.NODE_ENV === 'development' ? err.stack : undefined
+  });
 };
 
 export const notFoundHandler = (req: Request, res: Response): void => {

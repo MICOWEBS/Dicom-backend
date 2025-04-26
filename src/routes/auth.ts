@@ -65,7 +65,15 @@ router.post(
         subscriptionTier: 'free' as SubscriptionTier,
       });
 
-      await userRepository.save(user);
+      try {
+        await userRepository.save(user);
+      } catch (saveError) {
+        console.error('Error saving user:', saveError);
+        return res.status(500).json({ 
+          message: 'Error saving user to database',
+          error: saveError.message 
+        });
+      }
 
       // Generate JWT token
       const token = jwt.sign(
@@ -85,6 +93,7 @@ router.post(
         },
       });
     } catch (error) {
+      console.error('Registration error:', error);
       next(error);
     }
   }
