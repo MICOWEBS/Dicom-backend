@@ -1,8 +1,8 @@
-import { Router, Request, Response } from 'express';
+import express from 'express';
 
-const router = Router();
+const router = express.Router();
 
-router.get('/', (req: Request, res: Response) => {
+router.get('/', (req: express.Request, res: express.Response) => {
   res.status(200).json({
     status: 'ok',
     timestamp: new Date().toISOString(),
